@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Jogo da Cobrinha</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1,user-scalable=no" />
+    <style>
+        /* Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            background: #000;
+            color: #d4af37;
+            font-family: 'Poppins', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 900;
+            text-shadow:
+                0 0 8px #d4af37,
+                0 0 12px #b38f20;
+            letter-spacing: 0.1em;
+        }
+
+        #game-container {
+            position: relative;
+            background-color: #111;
+            border: 4px solid #d4af37;
+            border-radius: 20px;
+            box-shadow:
+                0 0 20px #d4af37bb;
+            touch-action: none;
+        }
+
+        canvas#gameCanvas {
+            display: block;
+            background-color: #000;
+            border-radius: 16px;
+            display: block;
+        }
+
+        #score-board {
+            margin-top: 15px;
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #ffd86f;
+            text-shadow:
+                0 0 7px #d4af37aa;
+            user-select: none;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(212, 175, 55, 0.7);
+            color: #000;
+            padding: 25px 40px;
+            border-radius: 20px;
+            font-weight: 900;
+            font-size: 1.8rem;
+            text-align: center;
+            box-shadow:
+                0 0 30px #d4af37ee;
+            display: none;
+            user-select: none;
+            z-index: 10;
+        }
+
+        #restart-btn {
+            margin-top: 18px;
+            background-color: #b38f20;
+            border: none;
+            border-radius: 30px;
+            padding: 12px 30px;
+            font-weight: 900;
+            font-size: 1.25rem;
+            cursor: pointer;
+            color: #fff;
+            box-shadow:
+                0 0 28px #b38f20cc;
+            letter-spacing: 0.07em;
+            transition: background-color 0.3s ease;
+            user-select: none;
+        }
+
+        #restart-btn:hover {
+            background-color: #ffd86f;
+            color: #000;
+            box-shadow:
+                0 0 36px #ffd86fdd;
+        }
+
+        /* Responsive for small mobile */
+        @media (max-width: 400px) {
+            #game-container {
+                width: 320px;
+                height: 320px;
+            }
+            canvas#gameCanvas {
+                width: 320px;
+                height: 320px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Jogo da Cobrinha</h1>
+    <div id="game-container" style="width: 400px; height: 400px;">
+        <canvas id="gameCanvas" width="400" height="400" aria-label="Área de jogo da cobrinha" role="img"></canvas>
+        <div id="game-over" role="alert" aria-live="assertive" tabindex="0">
+            Fim de Jogo!<br />
+            Sua pontuação final: <span id="final-score">0</span>
+            <button id="restart-btn" aria-label="Reiniciar jogo">Jogar Novamente</button>
+        </div>
+    </div>
+    <div id="score-board" aria-live="polite" aria-atomic="true">
+        Pontuação: 0
+    </div>
+
+    <script>
+        (() => {
+            'use strict';
+
+            // Canvas setup
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Grid size
+            const tileSize = 20;
+            const tileCountX = width / tileSize; // 20 tiles
+            const tileCountY = height / tileSize; // 20 tiles
+
+            // Colors
+            const bgColor = '#000';
+            const snakeColor = '#d4af37';
+            const snakeHeadColor = '#ffd86f';
+            const foodColor = '#b38f20';
+
+            // Game state
+            let snake = [];
+            const initialLength = 5;
+            let direction = 'right';
+            let food = {};
+            let score = 0;
+            let speed = 120; // ms per frame
+            let gameInterval = null;
+            let isGameOver = false;
+
+            // For preventing opposite direction instant turn
+            let lastDirection = direction;
+
+            // Touch swipe detection variables
+            let touchStartX = null;
+            let touchStartY = null;
+            const minSwipeDistance = 30;
+
+            // Initialize game
+            function init() {
+                snake = [];
+                for (let i = initialLength - 1; i >= 0; i--) {
+                    snake.push({ x: i, y: 0 });
+                }
+                direction = 'right';
+                lastDirection = direction;
+
+                spawnFood();
+                score = 0;
+                isGameOver = false;
+                updateScore();
+                hideGameOver();
+
+                if (gameInterval) clearInterval(gameInterval);
+                gameInterval = setInterval(gameLoop, speed);
+            }
+
+            // Spawn food in random location not occupied by snake
+            function spawnFood() {
+                while (true) {
+                    const x = Math.floor(Math.random() * tileCountX);
+                    const y = Math.floor(Math.random() * tileCountY);
+
+                    if (!snake.some(segment => segment.x === x && segment.y === y)) {
+                        food = { x, y };
+                        break;
+                    }
+                }
+            }
+
+            // Update score display
+            function updateScore() {
+                document.getElementById('score-board').textContent = `Pontuação: ${score}`;
+            }
+
+            // Show game over panel
+            function showGameOver() {
+                const gameOverDiv = document.getElementById('game-over');
+                const finalScoreSpan = document.getElementById('final-score');
+                finalScoreSpan.textContent = score;
+                gameOverDiv.style.display = 'block';
+                gameOverDiv.focus();
+            }
+
+            // Hide game over panel
+            function hideGameOver() {
+                document.getElementById('game-over').style.display = 'none';
+            }
+
+            // Game over action
+            function gameOver() {
+                isGameOver = true;
+                clearInterval(gameInterval);
+                showGameOver();
+            }
+
+            // Draw function
+            function draw() {
+                // Clear canvas
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(0, 0, width, height);
+
+                // Draw food
+                ctx.fillStyle = foodColor;
+                drawCircle(food.x * tileSize + tileSize / 2, food.y * tileSize + tileSize / 2, tileSize / 2 - 2);
+
+                // Draw snake
+                for (let i = 0; i < snake.length; i++) {
+                    const segment = snake[i];
+                    ctx.fillStyle = i === 0 ? snakeHeadColor : snakeColor;
+                    drawRoundedRect(segment.x * tileSize, segment.y * tileSize, tileSize, tileSize, 6);
+                }
+            }
+
+            // Helper draw rounded rect
+            function drawRoundedRect(x, y, w, h, r) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + w - r, y);
+                ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+                ctx.lineTo(x + w, y + h - r);
+                ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                ctx.lineTo(x + r, y + h);
+                ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+                ctx.lineTo(x, y + r);
+                ctx.quadraticCurveTo(x, y, x + r, y);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Helper draw circle
+            function drawCircle(x, y, radius) {
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+            // Move snake by adding a head and removing tail unless food eaten
+            function moveSnake() {
+                if (isGameOver) return;
+
+                let head = { ...snake[0] };
+
+                switch (direction) {
+                    case 'left': head.x--; break;
+                    case 'right': head.x++; break;
+                    case 'up': head.y--; break;
+                    case 'down': head.y++; break;
+                }
+
+                // Wrap-around (optional) or game over on border collision
+                if (
+                    head.x < 0 || head.x >= tileCountX ||
+                    head.y < 0 || head.y >= tileCountY
+                ) {
+                    gameOver();
+                    return;
+                }
+
+                // Check collision with self
+                if (snake.some(seg => seg.x === head.x && seg.y === head.y)) {
+                    gameOver();
+                    return;
+                }
+
+                // Add new head
+                snake.unshift(head);
+
+                // Check if food eaten
+                if (head.x === food.x && head.y === food.y) {
+                    score++;
+                    updateScore();
+                    spawnFood();
+
+                    // Speed increase every 5 points (max speed limit)
+                    if (score % 5 === 0 && speed > 60) {
+                        speed -= 8;
+                        clearInterval(gameInterval);
+                        gameInterval = setInterval(gameLoop, speed);
+                    }
+                } else {
+                    // Remove tail
+                    snake.pop();
+                }
+                lastDirection = direction;
+            }
+
+            // Main game loop
+            function gameLoop() {
+                moveSnake();
+                draw();
+            }
+
+            // Keyboard controls
+            document.addEventListener('keydown', (e) => {
+                if (isGameOver) return;
+                switch (e.key) {
+                    case 'ArrowUp':
+                    case 'w':
+                    case 'W':
+                        if (lastDirection !== 'down') direction = 'up';
+                        break;
+                    case 'ArrowDown':
+                    case 's':
+                    case 'S':
+                        if (lastDirection !== 'up') direction = 'down';
+                        break;
+                    case 'ArrowLeft':
+                    case 'a':
+                    case 'A':
+                        if (lastDirection !== 'right') direction = 'left';
+                        break;
+                    case 'ArrowRight':
+                    case 'd':
+                    case 'D':
+                        if (lastDirection !== 'left') direction = 'right';
+                        break;
+                }
+            });
+
+            // Touch controls for mobile swipe
+            const gameContainer = document.getElementById('game-container');
+            gameContainer.addEventListener('touchstart', (e) => {
+                const touch = e.changedTouches[0];
+                touchStartX = touch.pageX;
+                touchStartY = touch.pageY;
+            }, { passive: true });
+
+            gameContainer.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+            }, { passive: false });
+
+            gameContainer.addEventListener('touchend', (e) => {
+                if (isGameOver) return;
+                const touch = e.changedTouches[0];
+                const dx = touch.pageX - touchStartX;
+                const dy = touch.pageY - touchStartY;
+
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > minSwipeDistance && lastDirection !== 'left') {
+                        direction = 'right';
+                    } else if (dx < -minSwipeDistance && lastDirection !== 'right') {
+                        direction = 'left';
+                    }
+                } else {
+                    if (dy > minSwipeDistance && lastDirection !== 'up') {
+                        direction = 'down';
+                    } else if (dy < -minSwipeDistance && lastDirection !== 'down') {
+                        direction = 'up';
+                    }
+                }
+            }, { passive: true });
+
+            // Restart button
+            document.getElementById('restart-btn').addEventListener('click', () => {
+                init();
+            });
+
+            // Initial game start
+            init();
+        })();
+    </script>
+</body>
+
+</html>
